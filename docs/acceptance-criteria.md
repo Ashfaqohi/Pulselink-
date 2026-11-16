@@ -32,6 +32,11 @@ automated tests in later phases.
 - `/ready` reports required dependency readiness.
 - Redirect metrics distinguish successful and failed outcomes.
 - Prometheus labels remain bounded and do not contain full URLs, user IDs, or short codes.
+- The redirect journey emits metrics, OpenTelemetry traces, and structured JSON logs
+  correlated by a trace ID.
+- Telemetry excludes request bodies, credentials, user IDs, and full customer URLs.
+- Prometheus, Tempo, and Loki data is retained by the local observability stack and
+  viewable through the provisioned Grafana dashboard.
 
 ## Incident response
 

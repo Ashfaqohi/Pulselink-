@@ -563,7 +563,22 @@ incident remains open until recovery is verified.
 Run failure exercises only in an isolated environment or during an
 explicitly approved test window.
 
-## 17. Final engineering principle
+## 17. Project tracking and agent evidence
+
+The implementation plan is maintained in the [public task tracker](docs/task-tracker.md).
+Agent use of the tracker is recorded in the [agent activity log](docs/agent-activity.md).
+The team roles, handoff rules, review gates, and incident-response collaboration
+process are defined in the [agent team charter](docs/agent-team.md).
+Implementation and verification commands are documented in
+[local development](docs/local-development.md).
+The complete local stack can be started with `./scripts/run-local.sh`.
+The Docker-backed demo is available through `./scripts/demo.sh`, and the full
+verification suite through `./scripts/test-all.sh`.
+The tracker must be published with the repository and its placeholder GitHub URL
+must be replaced with the real public repository URL before claiming public
+accessibility.
+
+## 18. Final engineering principle
 
 Build it like a real production service. Break it deliberately, observe
 its failures, investigate the evidence, and engineer its recovery.

@@ -1,0 +1,56 @@
+name: Deploy to production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Immutable GHCR image tag to promote, normally a successful commit SHA from development
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}/pulselink
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+      - name: Fetch production task definition
+        env:
+          ECS_TASK_DEFINITION: ${{ secrets.ECS_TASK_DEFINITION }}
+        run: aws ecs describe-task-definition --task-definition "$ECS_TASK_DEFINITION" --query taskDefinition > task-definition.json
+      - id: render_backend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: backend
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-backend:${{ inputs.image_tag }}
+      - id: render_frontend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.render_backend.outputs.task-definition }}
+          container-name: frontend
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend:${{ inputs.image_tag }}
+      - uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render_frontend.outputs.task-definition }}
+          service: ${{ secrets.ECS_SERVICE }}
+          cluster: ${{ secrets.ECS_CLUSTER }}
+          wait-for-service-stability: true
+      - name: Verify production user impact
+        env:
+          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+        run: |
+          curl --fail --retry 10 --retry-delay 5 "$HEALTHCHECK_URL/health"
+          curl --fail --retry 10 --retry-delay 5 "$HEALTHCHECK_URL/ready"
+          curl --fail --retry 10 --retry-delay 5 "$HEALTHCHECK_URL/metrics" | grep -q redirect_requests_total

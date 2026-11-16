@@ -1,0 +1,79 @@
+name: Deploy to development
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}/pulselink
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-backend:${{ steps.meta.outputs.tag }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend:${{ steps.meta.outputs.tag }}
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.DEV_AWS_REGION }}
+          role-to-assume: ${{ secrets.DEV_AWS_DEPLOY_ROLE_ARN }}
+      - name: Fetch development task definition
+        env:
+          ECS_TASK_DEFINITION: ${{ secrets.DEV_ECS_TASK_DEFINITION }}
+        run: aws ecs describe-task-definition --task-definition "$ECS_TASK_DEFINITION" --query taskDefinition > task-definition.json
+      - id: render_backend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: backend
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-backend:${{ needs.publish.outputs.image_tag }}
+      - id: render_frontend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.render_backend.outputs.task-definition }}
+          container-name: frontend
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend:${{ needs.publish.outputs.image_tag }}
+      - uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render_frontend.outputs.task-definition }}
+          service: ${{ secrets.DEV_ECS_SERVICE }}
+          cluster: ${{ secrets.DEV_ECS_CLUSTER }}
+          wait-for-service-stability: true
+      - name: Verify development deployment
+        env:
+          HEALTHCHECK_URL: ${{ secrets.DEV_HEALTHCHECK_URL }}
+        run: |
+          curl --fail --retry 10 --retry-delay 5 "$HEALTHCHECK_URL/health"
+          curl --fail --retry 10 --retry-delay 5 "$HEALTHCHECK_URL/ready"
+          curl --fail --retry 10 --retry-delay 5 "$HEALTHCHECK_URL/metrics" | grep -q redirect_requests_total

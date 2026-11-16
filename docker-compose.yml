@@ -1,0 +1,103 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      PULSELINK_DB_PATH: /data/pulselink.db
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+      PULSELINK_LOG_PATH: /logs/app.jsonl
+    volumes:
+      - pulselink-data:/data
+      - pulselink-logs:/logs
+    expose:
+      - "8000"
+    networks: [pulselink]
+
+  responder:
+    build: ./responder
+    environment:
+      PULSELINK_BACKEND_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    expose:
+      - "8080"
+    networks: [pulselink]
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [pulselink]
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [pulselink]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    networks: [pulselink]
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    ports:
+      - "3000:3000"
+    depends_on: [prometheus]
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks: [pulselink]
+
+  tempo:
+    image: grafana/tempo:2.7.2
+    command: ["-config.file=/etc/tempo.yml"]
+    volumes:
+      - ./observability/tempo.yml:/etc/tempo.yml:ro
+      - tempo-data:/var/tempo
+    expose:
+      - "3200"
+      - "4318"
+    networks: [pulselink]
+
+  loki:
+    image: grafana/loki:3.4.2
+    command: ["-config.file=/etc/loki.yml"]
+    volumes:
+      - ./observability/loki.yml:/etc/loki.yml:ro
+      - loki-data:/loki
+    expose:
+      - "3100"
+    networks: [pulselink]
+
+  promtail:
+    image: grafana/promtail:3.4.2
+    command: ["-config.file=/etc/promtail.yml"]
+    volumes:
+      - ./observability/promtail.yml:/etc/promtail.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on: [loki]
+    networks: [pulselink]
+
+volumes:
+  pulselink-data:
+
+  pulselink-logs:
+  tempo-data:
+  loki-data:
+networks:
+  pulselink:
